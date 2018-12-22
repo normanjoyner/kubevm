@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+
+KUBEVM_BASE_DIR=~/.kubevm
+POSITIONAL_ARGS=()
+COMMAND=list
+
+# exit process and print error message
+exit_with_error() {
+  echo >&2 "${1}"
+  exit 1
+}
+
+usage() {
+  cat <<"EOF"
+USAGE:
+  kubevm                       : list & set the available kubectl versions
+  kubevm <VERSION>             : download & set a kubectl version
+  kubevm -d,--delete <VERSION> : remove a kubectl version
+  kubevm -h,--help             : show this message
+EOF
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      -d|--delete)
+	COMMAND="delete"
+	;;
+      -h|--help)
+	COMMAND="help"
+	;;
+      *)
+	POSITIONAL_ARGS+=("$1")
+	;;
+    esac
+    shift
+  done
+}
+
+# download kubectl binary
+download_kubectl_version() {
+  local version=${1}
+  if [[ "${OSTYPE}" == "linux-gnu" ]]; then
+    local os="linux"
+  elif [[ "${OSTYPE}" == "darwin"* ]]; then
+    local os="darwin"
+  else
+    exit_with_error "Invalid operating system detected. Are you running MacOS or Linux?"
+  fi
+
+  # create directory to hold kubectl version if it does not yet exist
+  if [[ ! -d ${KUBEVM_BASE_DIR}/${version} ]]; then
+    mkdir -p ${KUBEVM_BASE_DIR}/${version}
+  else
+    set_version ${version}
+    return
+  fi
+
+  echo -n "Installing version ${version} of kubectl ... "
+  status_code=$(curl -L https://storage.googleapis.com/kubernetes-release/release/v${version}/bin/${os}/amd64/kubectl -o ${KUBEVM_BASE_DIR}/${version}/kubectl --silent -w "%{http_code}")
+
+  if [[ $status_code == "200" ]]; then
+    chmod +x ${KUBEVM_BASE_DIR}/${version}/kubectl
+    echo "done"
+    set_version ${version}
+  else
+    echo "failed"
+    delete_version ${version}
+    exit_with_error "Could not download kubectl version ${version}"
+  fi
+}
+
+# update symlink to point to desired kubectl version
+set_version() {
+  local version=${1}
+  ln -sf ${KUBEVM_BASE_DIR}/${version}/kubectl /usr/local/bin/kubectl
+  echo "You are now using kubectl version ${version}"
+}
+
+# interactive version selection using fzf inspired by https://github.com/ahmetb/kubectx
+set_version_interactive() {
+  local version
+  version="$(FZF_DEFAULT_COMMAND="${SELF_CMD}" ls ${KUBEVM_BASE_DIR} | fzf --ansi || true)"
+  if [[ -z "${version}" ]]; then
+    exit_with_error "Error: you must choose a version!"
+  else
+    set_version ${version}
+  fi
+}
+
+# delete specified kubectl version
+delete_version() {
+  local version=${1}
+  if [[ -d ${KUBEVM_BASE_DIR}/${version} && -f ${KUBEVM_BASE_DIR}/${version}/kubectl ]]; then
+    rm -rf ${KUBEVM_BASE_DIR}/${version}
+  fi
+}
+
+# list available kubectl versions
+list_versions() {
+  for version in $(ls ${KUBEVM_BASE_DIR}); do
+    echo $version;
+  done
+}
+
+main(){
+  parse_args $@
+
+  # ensure base directory exists
+  if [[ ! -d ${KUBEVM_BASE_DIR} ]]; then
+    mkdir ${KUBEVM_BASE_DIR}/${version}
+  fi
+
+  # execute proper command
+  case $COMMAND in
+    list)
+      if [[ "${#POSITIONAL_ARGS[@]}" -eq 0 ]]; then
+        if [[ "$(type fzf &>/dev/null; echo $?)" -eq 0 ]]; then
+          set_version_interactive
+        else
+          list_versions
+        fi
+      elif [[ "${#POSITIONAL_ARGS[@]}" -eq 1 ]]; then
+        local version=${POSITIONAL_ARGS[0]}
+        download_kubectl_version ${version}
+      else
+        exit_with_error "Invalid number of arguments provided!"
+      fi
+      ;;
+    delete)
+      if [[ "${#POSITIONAL_ARGS[@]}" -eq 1 ]]; then
+        local version=${POSITIONAL_ARGS[0]}
+        delete_version $version
+        echo "Deleted kubectl version ${version}"
+      else
+        exit_with_error "Invalid number of arguments provided!"
+      fi
+      ;;
+    help)
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main $@
