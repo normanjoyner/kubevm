@@ -25,3 +25,4 @@ USAGE:
 Thank you for your interest in this project and for your interest in contributing! Feel free to open issues for feature requests, bugs, or even just questions - we love feedback and want to hear from you.
 
 Pull requests are also always welcome! However, if the feature you're considering adding is fairly large in scope, please consider opening an issue for discussion first.
+See [CONTRIBUTING.md](/CONTRIBUTING.md) for more details.
